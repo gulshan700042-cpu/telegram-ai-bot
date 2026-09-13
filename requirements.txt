@@ -1,4 +1,5 @@
-python-telegram-bot==20.8
-google-generativeai==0.8.3
-pillow==10.4.0
+
+python-telegram-bot>=21.6
+google-generativeai>=0.8.3
+pillow>=10.4.0
 
