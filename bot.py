@@ -1,5 +1,6 @@
 import os
 import io
+import asyncio
 import threading
 import logging
 from flask import Flask
@@ -48,25 +49,52 @@ model = genai.GenerativeModel(
     system_instruction=SYSTEM_INSTRUCTION
 )
 
-# Helper: Crash-proof message sender (Safe against deleted messages & 4096-char limits)
-async def safe_reply(msg, chat_id, context, text):
+DELETE_NOTICE = "\n\n⚠️ *Yeh message 5 minute baad delete ho jayega, ise save or share kar lijiye!*"
+
+# 5-minute background auto-delete function
+async def delete_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay: int = 300):
+    await asyncio.sleep(delay)
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        logger.warning(f"Auto-delete skip ya fail hua (Msg ID {message_id}): {e}")
+
+# Safe reply helper: Handles long text, deleted messages, and 5-min timer
+async def safe_reply(msg, chat_id, context, text, auto_delete=True):
     if not text:
         text = "Koyi response generate nahi hua."
 
-    # 4000-character chunks to prevent Telegram length crash
+    if auto_delete:
+        text += DELETE_NOTICE
+
     chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
+    
     for chunk in chunks:
+        sent_msg = None
         try:
             if msg:
-                await msg.reply_text(chunk)
+                sent_msg = await msg.reply_text(chunk, parse_mode="Markdown")
             else:
-                await context.bot.send_message(chat_id=chat_id, text=chunk)
+                sent_msg = await context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode="Markdown")
         except Exception:
-            # Agar reply reference fail ho (deleted message error), fallback to direct message
             try:
-                await context.bot.send_message(chat_id=chat_id, text=chunk)
-            except Exception as final_e:
-                logger.error(f"Message delivery completely failed: {final_e}")
+                # Markdown format fail hone par plain text delivery
+                if msg:
+                    sent_msg = await msg.reply_text(chunk)
+                else:
+                    sent_msg = await context.bot.send_message(chat_id=chat_id, text=chunk)
+            except Exception:
+                # Deleted message fallback: Direct chat message
+                try:
+                    sent_msg = await context.bot.send_message(chat_id=chat_id, text=chunk)
+                except Exception as final_e:
+                    logger.error(f"Message delivery fail hui: {final_e}")
+
+        # 300 seconds (5 min) timer schedule
+        if auto_delete and sent_msg:
+            asyncio.create_task(
+                delete_after_delay(context, chat_id=chat_id, message_id=sent_msg.message_id, delay=300)
+            )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.channel_post
@@ -83,7 +111,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Daily general questions\n\n"
         "Chahein toh text likhein ya seedha photo bhejein!"
     )
-    await safe_reply(msg, chat_id, context, welcome_text)
+    await safe_reply(msg, chat_id, context, welcome_text, auto_delete=False)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.channel_post
@@ -98,10 +126,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         response = model.generate_content(msg.text)
-        await safe_reply(msg, chat_id, context, response.text)
+        await safe_reply(msg, chat_id, context, response.text, auto_delete=True)
     except Exception as e:
         logger.error(f"Error in handle_text: {e}")
-        await safe_reply(msg, chat_id, context, f"Error details: {e}")
+        await safe_reply(msg, chat_id, context, f"Error details: {e}", auto_delete=True)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.channel_post
@@ -123,12 +151,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Do not use LaTeX dollar signs ($) or caret (^) for powers."
         )
         response = model.generate_content([prompt, image])
-        await safe_reply(msg, chat_id, context, response.text)
+        await safe_reply(msg, chat_id, context, response.text, auto_delete=True)
     except Exception as e:
         logger.error(f"Error in handle_photo: {e}")
-        await safe_reply(msg, chat_id, context, f"Error details: {e}")
+        await safe_reply(msg, chat_id, context, f"Error details: {e}", auto_delete=True)
 
-# Global Error Handler: Bot will not crash on background exceptions
+# Global Error Handler: Prevents crashes from unhandled network exceptions
 async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"Exception while handling an update: {context.error}")
 
@@ -149,6 +177,5 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST & filters.TEXT, handle_text))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST & filters.PHOTO, handle_photo))
 
-    # drop_pending_updates=True purani stuck queries ko discard karke fresh start dega
     app.run_polling(drop_pending_updates=True)
     
