@@ -1,11 +1,16 @@
 import os
 import io
 import threading
+import logging
 from flask import Flask
 from PIL import Image
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
+
+# Setup logging
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Lightweight web server for Render Free Web Service
 flask_app = Flask(__name__)
@@ -43,35 +48,72 @@ model = genai.GenerativeModel(
     system_instruction=SYSTEM_INSTRUCTION
 )
 
+# Helper: Crash-proof message sender (Safe against deleted messages & 4096-char limits)
+async def safe_reply(msg, chat_id, context, text):
+    if not text:
+        text = "Koyi response generate nahi hua."
+
+    # 4000-character chunks to prevent Telegram length crash
+    chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
+    for chunk in chunks:
+        try:
+            if msg:
+                await msg.reply_text(chunk)
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=chunk)
+        except Exception:
+            # Agar reply reference fail ho (deleted message error), fallback to direct message
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=chunk)
+            except Exception as final_e:
+                logger.error(f"Message delivery completely failed: {final_e}")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message:
-        await update.message.reply_text(
-            "Namaste! Main aapka All-Rounder AI Assistant hoon.\n\n"
-            "Aap mujhse kuch bhi pooch sakte hain:\n"
-            "• Law / Kanoon (Sections, Rights, IPC/BNS)\n"
-            "• Computer, Coding & Tech doubts\n"
-            "• Math, Science & Academics\n"
-            "• Daily general questions\n\n"
-            "Chahein toh text likhein ya seedha photo bhejein!"
-        )
+    msg = update.message or update.channel_post
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
+        return
+
+    welcome_text = (
+        "Namaste! Main aapka All-Rounder AI Assistant hoon.\n\n"
+        "Aap mujhse kuch bhi pooch sakte hain:\n"
+        "• Law / Kanoon (Sections, Rights, IPC/BNS)\n"
+        "• Computer, Coding & Tech doubts\n"
+        "• Math, Science & Academics\n"
+        "• Daily general questions\n\n"
+        "Chahein toh text likhein ya seedha photo bhejein!"
+    )
+    await safe_reply(msg, chat_id, context, welcome_text)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.channel_post
     if not msg or not msg.text:
         return
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    chat_id = update.effective_chat.id
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    except Exception:
+        pass
+
     try:
         response = model.generate_content(msg.text)
-        await msg.reply_text(response.text)
+        await safe_reply(msg, chat_id, context, response.text)
     except Exception as e:
-        print(f"Error: {e}")
-        await msg.reply_text(f"Error details: {e}")
+        logger.error(f"Error in handle_text: {e}")
+        await safe_reply(msg, chat_id, context, f"Error details: {e}")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.channel_post
-    if not msg:
+    if not msg or not msg.photo:
         return
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    chat_id = update.effective_chat.id
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    except Exception:
+        pass
+
     try:
         photo_file = await msg.photo[-1].get_file()
         photo_bytes = await photo_file.download_as_bytearray()
@@ -81,10 +123,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Do not use LaTeX dollar signs ($) or caret (^) for powers."
         )
         response = model.generate_content([prompt, image])
-        await msg.reply_text(response.text)
+        await safe_reply(msg, chat_id, context, response.text)
     except Exception as e:
-        print(f"Error: {e}")
-        await msg.reply_text(f"Error details: {e}")
+        logger.error(f"Error in handle_photo: {e}")
+        await safe_reply(msg, chat_id, context, f"Error details: {e}")
+
+# Global Error Handler: Bot will not crash on background exceptions
+async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error(f"Exception while handling an update: {context.error}")
 
 if __name__ == '__main__':
     web_thread = threading.Thread(target=run_web)
@@ -92,7 +138,10 @@ if __name__ == '__main__':
     web_thread.start()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    
+
+    # Register error handler
+    app.add_error_handler(global_error_handler)
+
     # Handlers for PM, Groups & Channel Posts
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
@@ -100,5 +149,6 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST & filters.TEXT, handle_text))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST & filters.PHOTO, handle_photo))
 
-    app.run_polling()
+    # drop_pending_updates=True purani stuck queries ko discard karke fresh start dega
+    app.run_polling(drop_pending_updates=True)
     
