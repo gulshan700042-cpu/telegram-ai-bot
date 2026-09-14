@@ -44,40 +44,47 @@ model = genai.GenerativeModel(
 )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Namaste! Main aapka All-Rounder AI Assistant hoon.\n\n"
-        "Aap mujhse kuch bhi pooch sakte hain:\n"
-        "• Law / Kanoon (Sections, Rights, IPC/BNS)\n"
-        "• Computer, Coding & Tech doubts\n"
-        "• Math, Science & Academics\n"
-        "• Daily general questions\n\n"
-        "Chahein toh text likhein ya seedha photo bhejein!"
-    )
+    if update.message:
+        await update.message.reply_text(
+            "Namaste! Main aapka All-Rounder AI Assistant hoon.\n\n"
+            "Aap mujhse kuch bhi pooch sakte hain:\n"
+            "• Law / Kanoon (Sections, Rights, IPC/BNS)\n"
+            "• Computer, Coding & Tech doubts\n"
+            "• Math, Science & Academics\n"
+            "• Daily general questions\n\n"
+            "Chahein toh text likhein ya seedha photo bhejein!"
+        )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message or update.channel_post
+    if not msg or not msg.text:
+        return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
-        response = model.generate_content(update.message.text)
-        await update.message.reply_text(response.text)
+        response = model.generate_content(msg.text)
+        await msg.reply_text(response.text)
     except Exception as e:
         print(f"Error: {e}")
-        await update.message.reply_text(f"Error details: {e}")
+        await msg.reply_text(f"Error details: {e}")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message or update.channel_post
+    if not msg:
+        return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
-        photo_file = await update.message.photo[-1].get_file()
+        photo_file = await msg.photo[-1].get_file()
         photo_bytes = await photo_file.download_as_bytearray()
         image = Image.open(io.BytesIO(photo_bytes))
-        prompt = update.message.caption or (
+        prompt = msg.caption or (
             "Analyze and answer the query or question in this image thoroughly and clearly. "
             "Do not use LaTeX dollar signs ($) or caret (^) for powers."
         )
         response = model.generate_content([prompt, image])
-        await update.message.reply_text(response.text)
+        await msg.reply_text(response.text)
     except Exception as e:
         print(f"Error: {e}")
-        await update.message.reply_text(f"Error details: {e}")
+        await msg.reply_text(f"Error details: {e}")
 
 if __name__ == '__main__':
     web_thread = threading.Thread(target=run_web)
@@ -85,7 +92,13 @@ if __name__ == '__main__':
     web_thread.start()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    
+    # Handlers for PM, Groups & Channel Posts
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST & filters.TEXT, handle_text))
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST & filters.PHOTO, handle_photo))
+
     app.run_polling()
+    
