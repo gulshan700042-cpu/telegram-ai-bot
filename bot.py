@@ -7,6 +7,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
 
+# Lightweight web server for Render Free Web Service
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -17,33 +18,15 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     flask_app.run(host="0.0.0.0", port=port)
 
+# Credentials
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
 genai.configure(api_key=GEMINI_API_KEY)
-
-def get_best_model():
-    try:
-        supported = [
-            m.name for m in genai.list_models()
-            if 'generateContent' in m.supported_generation_methods
-        ]
-        for m in supported:
-            if 'flash' in m:
-                return genai.GenerativeModel(m)
-        for m in supported:
-            if 'pro' in m:
-                return genai.GenerativeModel(m)
-        if supported:
-            return genai.GenerativeModel(supported[0])
-    except Exception as e:
-        print(f"Model listing error: {e}")
-    return genai.GenerativeModel('gemini-1.5-flash')
-
-model = get_best_model()
+model = genai.GenerativeModel('gemini-3.6-flash')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Namaste! Koi bhi sawal likhein ya photo bhejein, main turant solve kar dunga.")
+    await update.message.reply_text("Namaste! Sawal likhkar bhejiye ya photo, main solve kar dunga.")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -60,7 +43,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_file = await update.message.photo[-1].get_file()
         photo_bytes = await photo_file.download_as_bytearray()
         image = Image.open(io.BytesIO(photo_bytes))
-        prompt = update.message.caption or "Solve this problem step-by-step with clear explanation."
+        prompt = update.message.caption or "Solve this problem step-by-step with explanation."
         response = model.generate_content([prompt, image])
         await update.message.reply_text(response.text)
     except Exception as e:
@@ -77,3 +60,4 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.run_polling()
+    
