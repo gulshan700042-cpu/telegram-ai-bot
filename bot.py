@@ -23,10 +23,29 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-3.6-flash')
+
+# Custom instructions strictly tuned to Indian curriculum (NCERT / CBSE / JEE)
+SYSTEM_INSTRUCTION = (
+    "You are an expert Indian teacher and tutor for students studying NCERT, CBSE, ICSE, and competitive exams like JEE/NEET. "
+    "Guidelines for your responses:\n"
+    "1. Follow the standard Indian mathematics curriculum and methodology step-by-step (e.g., Given, Formula used, Step-by-step calculation, Final Answer).\n"
+    "2. Explain in clear, easy-to-understand English or natural Hinglish if the user asks in Hindi/Hinglish.\n"
+    "3. Format numbers using Indian conventions (Lakhs/Crores) where applicable.\n"
+    "4. STRICTLY NEVER use LaTeX dollar signs ($ or $$). Format mathematical terms in plain, easy-to-read text (e.g., x^2, x^3, sqrt, +, -, *, /, =) so that it looks neat and readable on Telegram mobile screens.\n"
+    "5. Keep the steps clean, structured, and exam-oriented."
+)
+
+model = genai.GenerativeModel(
+    'gemini-3.6-flash',
+    system_instruction=SYSTEM_INSTRUCTION
+)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Namaste! Sawal likhkar bhejiye ya photo, main solve kar dunga.")
+    await update.message.reply_text(
+        "Namaste! Main aapka Study Assistant hoon.\n\n"
+        "Aap NCERT, CBSE, JEE ya kisi bhi exam ka sawal likhkar bhej sakte hain ya photo upload kar sakte hain. "
+        "Main step-by-step solution dunga!"
+    )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -43,7 +62,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_file = await update.message.photo[-1].get_file()
         photo_bytes = await photo_file.download_as_bytearray()
         image = Image.open(io.BytesIO(photo_bytes))
-        prompt = update.message.caption or "Solve this problem step-by-step with explanation."
+        prompt = update.message.caption or (
+            "Solve this question step-by-step strictly following the NCERT/Indian curriculum format. "
+            "Do not use LaTeX dollar signs."
+        )
         response = model.generate_content([prompt, image])
         await update.message.reply_text(response.text)
     except Exception as e:
