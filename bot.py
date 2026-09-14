@@ -22,16 +22,12 @@ def run_web():
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
+# Gemini setup
 genai.configure(api_key=GEMINI_API_KEY)
-
-# Using gemini-1.5-flash with fallback
-try:
-    model = genai.GenerativeModel('gemini-1.5-flash')
-except Exception:
-    model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Namaste! Sawal likhkar bhejiye ya photo, main solve kar dunga.")
+    await update.message.reply_text("Namaste! Koi bhi sawal likhein ya photo bhejein, main turant solve kar dunga.")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -43,12 +39,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error details: {e}")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_file = await update.message.photo[-1].get_file()
-    photo_bytes = await photo_file.download_as_bytearray()
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
         image = Image.open(io.BytesIO(photo_bytes))
-        prompt = update.message.caption or "Solve this problem step-by-step with explanation."
+        prompt = update.message.caption or "Solve this problem step-by-step with clear explanation."
         response = model.generate_content([prompt, image])
         await update.message.reply_text(response.text)
     except Exception as e:
@@ -65,5 +61,4 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.run_polling()
-    
     
