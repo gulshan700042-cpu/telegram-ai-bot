@@ -24,15 +24,20 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Custom instructions strictly tuned to Indian curriculum (NCERT / CBSE / JEE)
+# Strict textbook-style formatting instructions
 SYSTEM_INSTRUCTION = (
-    "You are an expert Indian teacher and tutor for students studying NCERT, CBSE, ICSE, and competitive exams like JEE/NEET. "
-    "Guidelines for your responses:\n"
-    "1. Follow the standard Indian mathematics curriculum and methodology step-by-step (e.g., Given, Formula used, Step-by-step calculation, Final Answer).\n"
-    "2. Explain in clear, easy-to-understand English or natural Hinglish if the user asks in Hindi/Hinglish.\n"
-    "3. Format numbers using Indian conventions (Lakhs/Crores) where applicable.\n"
-    "4. STRICTLY NEVER use LaTeX dollar signs ($ or $$). Format mathematical terms in plain, easy-to-read text (e.g., x^2, x^3, sqrt, +, -, *, /, =) so that it looks neat and readable on Telegram mobile screens.\n"
-    "5. Keep the steps clean, structured, and exam-oriented."
+    "You are a top Indian Maths & Science teacher. Your explanations must look EXACTLY like an Indian textbook (NCERT/CBSE/ICSE).\n\n"
+    "STRICT FORMATTING RULES:\n"
+    "1. NEVER use the caret symbol (^) for powers. ALWAYS write real superscript characters for powers (e.g., x², x³, x⁴, x⁵, y², z³, aⁿ, 10⁵).\n"
+    "2. NEVER use LaTeX dollar signs ($ or $$).\n"
+    "3. Use standard mathematical symbols like ×, ÷, ±, √, ≤, ≥, ≠, °, π instead of programming symbols (*, /, sqrt).\n"
+    "4. Follow the clear NCERT textbook steps:\n"
+    "   - Given:\n"
+    "   - To find / To prove:\n"
+    "   - Formula used:\n"
+    "   - Step-by-step Solution:\n"
+    "   - Final Answer:\n"
+    "5. Keep the font layout clean, spaced, and easy to read on mobile phones."
 )
 
 model = genai.GenerativeModel(
@@ -43,8 +48,8 @@ model = genai.GenerativeModel(
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Namaste! Main aapka Study Assistant hoon.\n\n"
-        "Aap NCERT, CBSE, JEE ya kisi bhi exam ka sawal likhkar bhej sakte hain ya photo upload kar sakte hain. "
-        "Main step-by-step solution dunga!"
+        "Aap kisi bhi sawal ka text bhej sakte hain ya photo upload kar sakte hain. "
+        "Aapko bilkul NCERT book style mein saaf-suthra solution milega!"
     )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -63,8 +68,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_bytes = await photo_file.download_as_bytearray()
         image = Image.open(io.BytesIO(photo_bytes))
         prompt = update.message.caption or (
-            "Solve this question step-by-step strictly following the NCERT/Indian curriculum format. "
-            "Do not use LaTeX dollar signs."
+            "Solve this question step-by-step in NCERT textbook format. "
+            "Do NOT use caret symbol (^) for powers; use Unicode superscripts like x², x³. "
+            "Do NOT use LaTeX dollar signs ($)."
         )
         response = model.generate_content([prompt, image])
         await update.message.reply_text(response.text)
