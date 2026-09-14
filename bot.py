@@ -7,7 +7,6 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
 
-# Lightweight web server for Render Free Web Service
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -18,13 +17,30 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     flask_app.run(host="0.0.0.0", port=port)
 
-# Credentials
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
-# Gemini setup
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
+def get_best_model():
+    try:
+        supported = [
+            m.name for m in genai.list_models()
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        for m in supported:
+            if 'flash' in m:
+                return genai.GenerativeModel(m)
+        for m in supported:
+            if 'pro' in m:
+                return genai.GenerativeModel(m)
+        if supported:
+            return genai.GenerativeModel(supported[0])
+    except Exception as e:
+        print(f"Model listing error: {e}")
+    return genai.GenerativeModel('gemini-1.5-flash')
+
+model = get_best_model()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Namaste! Koi bhi sawal likhein ya photo bhejein, main turant solve kar dunga.")
@@ -61,4 +77,3 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.run_polling()
-    
